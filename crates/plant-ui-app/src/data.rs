@@ -58,6 +58,10 @@ pub enum Req {
         base: String,
         request: PublishRequest,
     },
+    LookupDataPublishDeletions {
+        base: String,
+        request: PublishRequest,
+    },
     RoomCodePublish {
         base: String,
         request: RoomCodePublishRequest,
@@ -118,6 +122,7 @@ pub enum Evt {
         PublishRequest,
         anyhow::Result<crate::data_publish_api::SubmitResult>,
     ),
+    DataPublishDeletions(anyhow::Result<Vec<plant_ui::data_publish::DeletionCandidate>>),
     RoomCodePublish(anyhow::Result<crate::data_publish_api::SubmitResult>),
     /// 队列视图的逐单元明细，带发生在哪个任务上。
     ///
@@ -351,6 +356,12 @@ pub fn spawn(ctx: egui::Context, tasks: &bevy_wasm_tasks::Tasks<'_>) -> Bridge {
                     Req::DataPublish { base, request } => {
                         let result = crate::data_publish_api::submit(&base, &request).await;
                         let _ = evt_tx.send(Evt::DataPublish(request, result));
+                        ctx.request_repaint();
+                    }
+                    Req::LookupDataPublishDeletions { base, request } => {
+                        let result =
+                            crate::data_publish_api::lookup_deletions(&base, &request).await;
+                        let _ = evt_tx.send(Evt::DataPublishDeletions(result));
                         ctx.request_repaint();
                     }
                     Req::RoomCodePublish { base, request } => {

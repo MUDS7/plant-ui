@@ -1486,6 +1486,22 @@ impl App {
                         result,
                     );
                 }
+                data::Evt::DataPublishDeletions(result) => {
+                    self.data_publish_state.submitting = false;
+                    match result {
+                        Ok(candidates) => {
+                            self.data_publish_state.deletion_candidates = candidates;
+                            self.data_publish_state.delete_confirmation_open = true;
+                        }
+                        Err(error) => {
+                            self.data_publish_state.pending_request = None;
+                            let message =
+                                format!("获取待删除提资失败：{}", logs::error_chain(&error));
+                            eprintln!("[data_publish_delete_lookup] {message}");
+                            self.logs.error(&mut self.vm.logs, message, &error, None);
+                        }
+                    }
+                }
                 data::Evt::RoomCodePublish(result) => {
                     self.manual_data_publish_state.submitting = false;
                     self.handle_publish_result(
@@ -1728,6 +1744,27 @@ impl App {
                             &mut self.vm.logs,
                             "提交数据发布请求失败",
                             &anyhow::anyhow!("数据请求线程不可用"),
+                            None,
+                        );
+                    }
+                }
+                Cmd::LookupDataPublishDeletions(request) => {
+                    if self
+                        .bridge
+                        .req
+                        .send(data::Req::LookupDataPublishDeletions {
+                            base: self.data_api_url.clone(),
+                            request,
+                        })
+                        .is_err()
+                    {
+                        self.data_publish_state.submitting = false;
+                        self.data_publish_state.pending_request = None;
+                        eprintln!("[data_publish_delete_lookup] 数据服务线程不可用");
+                        self.logs.error(
+                            &mut self.vm.logs,
+                            "获取待删除提资失败：数据服务线程不可用",
+                            &anyhow::anyhow!("数据服务线程不可用"),
                             None,
                         );
                     }

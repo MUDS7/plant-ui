@@ -136,6 +136,7 @@ pub enum Cmd {
     SubmitRoomCodePublish(manual_data_publish::RoomCodePublishRequest),
     /// 提交三维数据发布请求；实际发送由宿主负责。
     SubmitDataPublish(data_publish::PublishRequest),
+    LookupDataPublishDeletions(data_publish::PublishRequest),
     /// 打开并刷新模型增量更新预览。
     OpenModelUpdate,
     /// 重新读取当前项目的增量范围。

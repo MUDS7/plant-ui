@@ -1,6 +1,6 @@
 use aios_core::data_center::{ThreeDDatacenterRequest, ThreeDDatacenterResponse};
 use anyhow::Context;
-use plant_ui::data_publish::{DesignPhase, PublishCategory, PublishRequest};
+use plant_ui::data_publish::{DeletionCandidate, PublishCategory, PublishRequest};
 use plant_ui::manual_data_publish::RoomCodePublishRequest;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -52,6 +52,44 @@ pub async fn submit(base: &str, request: &PublishRequest) -> anyhow::Result<Subm
     }
 
     response_body(request.category, body)
+}
+
+pub async fn lookup_deletions(
+    base: &str,
+    request: &PublishRequest,
+) -> anyhow::Result<Vec<DeletionCandidate>> {
+    let payload = deletion_lookup_body(request)?.to_string();
+    let url = format!("{base}/get_datacenter_delete_by_refnos");
+    eprintln!(
+        "[data_publish_delete_lookup] POST {url}\n[data_publish_delete_lookup] request: {payload}"
+    );
+    let mut req = http_request(url.clone(), payload.clone());
+    req.timeout = Some(Duration::from_secs(60));
+    let response = ehttp::fetch_async(req)
+        .await
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("POST {url} 请求失败；请求体：{payload}"))?;
+    let status = response.status;
+    let body = response
+        .text()
+        .with_context(|| format!("POST {url} 返回 HTTP {status}，响应不是 UTF-8"))?;
+    if !response.ok {
+        anyhow::bail!("POST {url} 返回 HTTP {status}；请求体：{payload}；响应体：{body}")
+    }
+    serde_json::from_str(body).with_context(|| {
+        format!("POST {url} 返回 HTTP {status}，响应不是 id/name 数组；响应体：{body}")
+    })
+}
+
+fn deletion_lookup_body(request: &PublishRequest) -> anyhow::Result<serde_json::Value> {
+    if request.elements.is_empty() {
+        anyhow::bail!("请至少添加一个元素");
+    }
+    Ok(serde_json::json!({
+        "refnos": request.elements.iter().map(|element| {
+            element.refno.to_string().replace('_', "/")
+        }).collect::<Vec<_>>(),
+    }))
 }
 
 pub async fn submit_room_codes(
@@ -131,7 +169,10 @@ fn three_d_response_body(body: &str) -> anyhow::Result<SubmitResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plant_ui::{RefU64, data_publish::PublishElement};
+    use plant_ui::{
+        RefU64,
+        data_publish::{DesignPhase, PublishElement},
+    };
 
     fn request(category: PublishCategory) -> PublishRequest {
         PublishRequest {
@@ -176,6 +217,28 @@ mod tests {
         let mut request = request(PublishCategory::Process);
         request.elements.clear();
         assert!(request_body(&request).is_err());
+    }
+
+    #[test]
+    fn deletion_lookup_uses_only_slash_separated_refnos() {
+        let mut request = request(PublishCategory::Process);
+        request.elements.push(PublishElement {
+            refno: RefU64::from(12_346_u64),
+            name: "/PIPE-101".into(),
+        });
+        assert_eq!(
+            deletion_lookup_body(&request).unwrap(),
+            serde_json::json!({"refnos": ["0/12345", "0/12346"]})
+        );
+    }
+
+    #[test]
+    fn deletion_lookup_response_selects_every_candidate() {
+        let candidates: Vec<DeletionCandidate> =
+            serde_json::from_str(r#"[{"id":"24383/66458","name":"/1WCC1135"}]"#).unwrap();
+        assert_eq!(candidates[0].id, "24383/66458");
+        assert_eq!(candidates[0].name, "/1WCC1135");
+        assert!(candidates[0].selected);
     }
 
     #[test]
