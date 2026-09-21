@@ -129,7 +129,7 @@ fn request_body(request: &PublishRequest) -> anyhow::Result<serde_json::Value> {
     if request.elements.is_empty() {
         anyhow::bail!("请至少添加一个元素");
     }
-    Ok(serde_json::to_value(ThreeDDatacenterRequest {
+    let mut body = serde_json::to_value(ThreeDDatacenterRequest {
         refnos: request
             .elements
             .iter()
@@ -138,7 +138,22 @@ fn request_body(request: &PublishRequest) -> anyhow::Result<serde_json::Value> {
         title: request.title.clone(),
         create_rvm_relations: true,
         b_first_time_design: false,
-    })?)
+    })?;
+    if matches!(
+        request.category,
+        PublishCategory::Process
+            | PublishCategory::Electrical
+            | PublishCategory::Instrumentation
+            | PublishCategory::Ventilation
+    ) {
+        body.as_object_mut()
+            .expect("ThreeDDatacenterRequest 必须序列化为 JSON 对象")
+            .insert(
+                "delete_refnos".into(),
+                serde_json::to_value(&request.delete_refnos)?,
+            );
+    }
+    Ok(body)
 }
 
 fn response_body(_category: PublishCategory, body: &str) -> anyhow::Result<SubmitResult> {
@@ -183,20 +198,29 @@ mod tests {
                 refno: RefU64::from(12_345_u64),
                 name: "/PIPE-100".into(),
             }],
+            delete_refnos: vec!["24383/66458".into(), "24383/66457".into()],
         }
     }
 
     #[test]
-    fn professional_publish_uses_the_datacenter_contract() {
-        assert_eq!(
-            request_body(&request(PublishCategory::Process)).unwrap(),
-            serde_json::json!({
+    fn four_professional_publish_endpoints_include_delete_refnos() {
+        for category in [
+            PublishCategory::Process,
+            PublishCategory::Electrical,
+            PublishCategory::Instrumentation,
+            PublishCategory::Ventilation,
+        ] {
+            assert_eq!(
+                request_body(&request(category)).unwrap(),
+                serde_json::json!({
                 "refnos": ["0_12345"],
                 "title": "发布测试",
                 "create_rvm_relations": true,
                 "b_first_time_design": false,
-            })
-        );
+                "delete_refnos": ["24383/66458", "24383/66457"],
+                })
+            );
+        }
     }
 
     #[test]

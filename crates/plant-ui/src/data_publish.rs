@@ -81,6 +81,7 @@ pub struct PublishRequest {
     pub category: PublishCategory,
     pub design_phase: DesignPhase,
     pub elements: Vec<PublishElement>,
+    pub delete_refnos: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
@@ -119,7 +120,16 @@ impl State {
     }
 
     fn confirm_publish(&mut self) -> Option<Cmd> {
-        let request = self.pending_request.take()?;
+        if self.submitting {
+            return None;
+        }
+        let mut request = self.pending_request.clone()?;
+        request.delete_refnos = self
+            .deletion_candidates
+            .iter()
+            .filter(|candidate| candidate.selected)
+            .map(|candidate| candidate.id.clone())
+            .collect();
         self.submitting = true;
         Some(Cmd::SubmitDataPublish(request))
     }
@@ -325,7 +335,7 @@ pub fn show(
             });
         });
 
-    state.open = window_open;
+    state.open = window_open || (state.submitting && state.delete_confirmation_open);
     if !state.open {
         state.preview_open = false;
         state.delete_confirmation_open = false;
@@ -365,7 +375,7 @@ fn show_delete_confirmation(
         .resizable(false)
         .fixed_size([density.px(420.0), density.px(300.0)])
         .show(ctx, |ui| {
-            ui.scope(|ui| {
+            ui.add_enabled_ui(!state.submitting, |ui| {
                 let widgets = &mut ui.visuals_mut().widgets;
                 for visuals in [
                     &mut widgets.inactive,
@@ -427,19 +437,24 @@ fn show_delete_confirmation(
             });
             ui.add_space((ui.available_height() - density.btn_h()).max(0.0));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add(widgets::button(tokens, density, "确认").primary())
-                    .clicked()
-                {
-                    close_requested = true;
+                let confirm = ui.add_enabled(
+                    !state.submitting,
+                    widgets::button(tokens, density, "确认")
+                        .primary()
+                        .loading(state.submitting),
+                );
+                if confirm.clicked() {
                     confirmed = true;
                 }
-                if ui.add(widgets::button(tokens, density, "取消")).clicked() {
+                if ui
+                    .add_enabled(!state.submitting, widgets::button(tokens, density, "取消"))
+                    .clicked()
+                {
                     close_requested = true;
                 }
             });
         });
-    state.delete_confirmation_open = open && !close_requested;
+    state.delete_confirmation_open = state.submitting || (open && !close_requested);
     if confirmed {
         return state.confirm_publish();
     }
@@ -618,6 +633,18 @@ mod tests {
             state.start_lookup(),
             Cmd::LookupDataPublishDeletions(_)
         ));
+        state.deletion_candidates = vec![
+            DeletionCandidate {
+                id: "24383/66458".into(),
+                name: "/1WCC1135".into(),
+                selected: true,
+            },
+            DeletionCandidate {
+                id: "24383/66457".into(),
+                name: "/1WCC1134".into(),
+                selected: false,
+            },
+        ];
         state.request.title = "之后修改的标题".into();
         state.submitting = false;
 
@@ -625,8 +652,9 @@ mod tests {
             panic!("确认后应提交原始提资请求");
         };
         assert_eq!(request.title, "原始标题");
+        assert_eq!(request.delete_refnos, vec!["24383/66458"]);
         assert!(state.submitting);
-        assert!(state.pending_request.is_none());
+        assert!(state.pending_request.is_some());
         assert!(state.confirm_publish().is_none());
     }
 

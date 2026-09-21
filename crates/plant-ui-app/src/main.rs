@@ -1479,6 +1479,9 @@ impl App {
                 },
                 data::Evt::DataPublish(request, result) => {
                     self.data_publish_state.submitting = false;
+                    self.data_publish_state.delete_confirmation_open = false;
+                    self.data_publish_state.pending_request = None;
+                    self.data_publish_state.deletion_candidates.clear();
                     self.handle_publish_result(
                         ctx,
                         request.category.label(),
